@@ -14,7 +14,8 @@ class FaceRealtime:
         label_map,
         img_size=(112,112),
         vote_size=5,
-        detect_interval=5   # 🔥 kunci utama
+        detect_interval=5,
+        confidence_threshold=0.75
     ):
         self.model = tf.keras.models.load_model(model_path)
         self.detector = MTCNN()
@@ -25,23 +26,27 @@ class FaceRealtime:
 
         self.vote_size = vote_size
         self.pred_queue = deque(maxlen=vote_size)
+        self.confidence_threshold = confidence_threshold
 
         # 🔥 optimasi
         self.detect_interval = detect_interval
         self.frame_count = 0
         self.last_faces = []
 
-    # =====================================================
-    # 🔹 PREDICT
-    # =====================================================
+    # PREDICT
     def predict_face(self, face_img):
         img = self.preprocess.process_for_model(face_img)
         pred = self.model.predict(img, verbose=0)
-        return np.argmax(pred)
+        pred_scores = pred[0]
+        best_label = int(np.argmax(pred_scores))
+        best_confidence = float(np.max(pred_scores))
 
-    # =====================================================
-    # 🔹 VOTING
-    # =====================================================
+        if best_confidence < self.confidence_threshold:
+            return "unknown face", best_confidence
+
+        return best_label, best_confidence
+
+    # VOTING
     def voting(self, label):
         self.pred_queue.append(label)
 
@@ -61,14 +66,12 @@ class FaceRealtime:
 
         return cv2.resize(frame, (new_w, new_h))
 
-    # =====================================================
-    # 🔹 MAIN LOOP
-    # =====================================================
+    # MAIN LOOP
     def run(self):
         cap = cv2.VideoCapture(0)
 
         if not cap.isOpened():
-            print("❌ Kamera tidak bisa dibuka")
+            print("Kamera tidak bisa dibuka")
             return
 
         print("Tekan 'q' untuk keluar")
@@ -82,18 +85,12 @@ class FaceRealtime:
 
             self.frame_count += 1
 
-            # =====================================================
-            # 🔥 DETEKSI HANYA TIAP N FRAME
-            # =====================================================
             if self.frame_count % self.detect_interval == 0:
                 faces = self.detector.detect_faces(frame)
                 self.last_faces = faces
             else:
                 faces = self.last_faces
 
-            # =====================================================
-            # 🔹 LOOP WAJAH
-            # =====================================================
             for face in faces:
                 x, y, w, h = face['box']
 
@@ -103,21 +100,24 @@ class FaceRealtime:
                 if face_img.size == 0:
                     continue
 
-                # 🔹 predict
-                label = self.predict_face(face_img)
+                # predict
+                label, confidence = self.predict_face(face_img)
 
-                # 🔹 voting
+                # voting
                 final_label = self.voting(label)
 
-                name = self.inverse_label_map.get(final_label, "Unknown")
+                if final_label == "unknown face":
+                    name = "unknown face"
+                else:
+                    name = self.inverse_label_map.get(final_label, "unknown face")
 
-                # 🔹 bounding box
+                # bounding box
                 cv2.rectangle(frame, (x,y), (x+w, y+h), (0,255,0), 2)
 
-                # 🔹 label
+                # label
                 cv2.putText(
                     frame,
-                    name,
+                    f"{name} ({confidence:.2f})",
                     (x, y-10),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
@@ -126,7 +126,7 @@ class FaceRealtime:
                 )
 
             # =====================================================
-            # 🔹 DISPLAY
+            # DISPLAY
             # =====================================================
             cv2.imshow("Face Realtime (Fast MTCNN)", frame)
 

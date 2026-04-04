@@ -6,9 +6,7 @@ BASE_DIR = Path(__file__).parent
 INPUT_DIR = BASE_DIR / "DATASET"
 OUTPUT_DIR = BASE_DIR / "DATASET_FACES"
 
-
 def main():
-    # 112x112 adalah standar untuk AdaFace, MagFace, ArcFace, CosFace
     detector = FaceDetector(
         image_size=(112, 112),
         margin_ratio=0.2,

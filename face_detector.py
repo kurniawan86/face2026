@@ -6,47 +6,18 @@ from mtcnn import MTCNN
 
 
 class FaceDetector:
-    """Face detector menggunakan MTCNN untuk mengekstrak wajah dari gambar."""
 
     def __init__(self, image_size: tuple = (112, 112), margin_ratio: float = 0.2, min_confidence: float = 0.9):
-        """
-        Args:
-            image_size: Ukuran output gambar wajah (width, height).
-                        Default 112x112 — standar untuk AdaFace, MagFace, ArcFace, CosFace.
-            margin_ratio: Margin proporsional terhadap ukuran bounding box (0.2 = 20%).
-                          Proporsional agar konsisten untuk gambar input berbeda ukuran.
-            min_confidence: Minimum confidence score untuk deteksi wajah.
-        """
         self.image_size = image_size
         self.margin_ratio = margin_ratio
         self.min_confidence = min_confidence
         self.detector = MTCNN()
 
     def detect_faces(self, image: np.ndarray) -> list[dict]:
-        """Deteksi semua wajah dalam gambar.
-
-        Args:
-            image: Gambar dalam format numpy array (RGB).
-
-        Returns:
-            List deteksi wajah dari MTCNN, difilter berdasarkan confidence.
-        """
         detections = self.detector.detect_faces(image)
         return [d for d in detections if d["confidence"] >= self.min_confidence]
 
     def crop_face(self, image: np.ndarray, box: list) -> Image.Image:
-        """Crop wajah dari gambar berdasarkan bounding box.
-
-        Margin dihitung proporsional terhadap ukuran bounding box sehingga
-        konsisten untuk gambar input dengan berbagai ukuran (kecil maupun besar).
-
-        Args:
-            image: Gambar sumber dalam format numpy array (RGB).
-            box: Bounding box [x, y, width, height] dari MTCNN.
-
-        Returns:
-            Gambar wajah yang sudah di-crop dan di-resize ke self.image_size.
-        """
         x, y, w, h = box
         img_h, img_w = image.shape[:2]
 
@@ -62,14 +33,6 @@ class FaceDetector:
         return face.resize(self.image_size, Image.LANCZOS)
 
     def process_image(self, image_path: str | Path) -> list[Image.Image]:
-        """Proses satu gambar dan kembalikan semua wajah yang terdeteksi.
-
-        Args:
-            image_path: Path ke file gambar.
-
-        Returns:
-            List gambar wajah yang terdeteksi.
-        """
         img = Image.open(image_path).convert("RGB")
         img_array = np.array(img)
         detections = self.detect_faces(img_array)
@@ -82,17 +45,6 @@ class FaceDetector:
         return faces
 
     def process_dataset(self, input_dir: str | Path, output_dir: str | Path) -> dict:
-        """Proses seluruh dataset, ekstrak wajah, dan simpan ke output_dir.
-
-        Struktur folder output akan sama dengan input_dir.
-
-        Args:
-            input_dir: Folder dataset sumber.
-            output_dir: Folder tujuan untuk menyimpan gambar wajah.
-
-        Returns:
-            Statistik pemrosesan: total, berhasil, tidak ada wajah, error.
-        """
         input_dir = Path(input_dir)
         output_dir = Path(output_dir)
 

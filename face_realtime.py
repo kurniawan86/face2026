@@ -13,9 +13,9 @@ class FaceRealtime:
         model_path,
         label_map,
         img_size=(112,112),
-        vote_size=5,
-        detect_interval=5,
-        confidence_threshold=0.75
+        vote_size=10,
+        detect_interval=10,
+        confidence_threshold=0.65
     ):
         self.model = tf.keras.models.load_model(model_path)
         self.detector = MTCNN()
@@ -25,53 +25,78 @@ class FaceRealtime:
         self.inverse_label_map = {v: k for k, v in label_map.items()}
 
         self.vote_size = vote_size
-        self.pred_queue = deque(maxlen=vote_size)
+        self.pred_queues = {}
+
         self.confidence_threshold = confidence_threshold
 
-        # 🔥 optimasi
         self.detect_interval = detect_interval
         self.frame_count = 0
         self.last_faces = []
 
-    # PREDICT
-    def predict_face(self, face_img):
-        img = self.preprocess.process_for_model(face_img)
-        pred = self.model.predict(img, verbose=0)
-        pred_scores = pred[0]
-        best_label = int(np.argmax(pred_scores))
-        best_confidence = float(np.max(pred_scores))
-
-        if best_confidence < self.confidence_threshold:
-            return "unknown face", best_confidence
-
-        return best_label, best_confidence
-
-    # VOTING
-    def voting(self, label):
-        self.pred_queue.append(label)
-
-        if len(self.pred_queue) == self.vote_size:
-            return Counter(self.pred_queue).most_common(1)[0][0]
-        return label
-
-    def resize_with_aspect_ratio(self, frame, max_width=640):
+    # =====================================================
+    # 🔹 RESIZE (ANTI DISTORSI)
+    # =====================================================
+    def resize_with_aspect_ratio(self, frame, max_width=800):
         h, w = frame.shape[:2]
 
         if w <= max_width:
             return frame
 
         scale = max_width / w
-        new_w = int(w * scale)
-        new_h = int(h * scale)
+        return cv2.resize(frame, (int(w*scale), int(h*scale)))
 
-        return cv2.resize(frame, (new_w, new_h))
+    # =====================================================
+    # 🔹 SAFE CROP
+    # =====================================================
+    def safe_crop(self, frame, x1, y1, x2, y2):
+        h, w = frame.shape[:2]
 
-    # MAIN LOOP
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        x2 = min(w, x2)
+        y2 = min(h, y2)
+
+        return frame[y1:y2, x1:x2]
+
+    # =====================================================
+    # 🔹 PREDICT
+    # =====================================================
+    def predict_face(self, face_img, keypoints=None):
+        try:
+            img = self.preprocess.process_for_model(face_img, keypoints)
+            pred = self.model.predict(img, verbose=0)[0]
+
+            label = int(np.argmax(pred))
+            confidence = float(np.max(pred))
+
+            if confidence < self.confidence_threshold:
+                return "unknown", confidence
+
+            return label, confidence
+
+        except:
+            return "unknown", 0.0
+
+    # =====================================================
+    # 🔹 VOTING
+    # =====================================================
+    def voting(self, face_id, label):
+        if face_id not in self.pred_queues:
+            self.pred_queues[face_id] = deque(maxlen=self.vote_size)
+
+        q = self.pred_queues[face_id]
+        q.append(label)
+
+        return Counter(q).most_common(1)[0][0]
+
+    # =====================================================
+    # 🔹 MAIN LOOP
+    # =====================================================
     def run(self):
         cap = cv2.VideoCapture(0)
 
         if not cap.isOpened():
-            print("Kamera tidak bisa dibuka")
+            print("❌ Kamera tidak bisa dibuka")
             return
 
         print("Tekan 'q' untuk keluar")
@@ -81,58 +106,87 @@ class FaceRealtime:
             if not ret:
                 break
 
-            frame = self.resize_with_aspect_ratio(frame,max_width=700)
+            frame = self.resize_with_aspect_ratio(frame)
 
             self.frame_count += 1
 
+            # 🔥 DETEKSI PERIODIK
             if self.frame_count % self.detect_interval == 0:
                 faces = self.detector.detect_faces(frame)
                 self.last_faces = faces
             else:
                 faces = self.last_faces
 
-            for face in faces:
-                x, y, w, h = face['box']
+            # =====================================================
+            # 🔹 LOOP FACE
+            # =====================================================
+            for idx, face in enumerate(faces):
+                try:
+                    x, y, w, h = face['box']
+                    keypoints = face.get('keypoints', None)
 
-                x, y = max(0, x), max(0, y)
+                    # 🔥 margin biar tidak terlalu sempit
+                    margin = int(0.2 * w)
 
-                face_img = frame[y:y+h, x:x+w]
-                if face_img.size == 0:
+                    x1 = x - margin
+                    y1 = y - margin
+                    x2 = x + w + margin
+                    y2 = y + h + margin
+
+                    face_img = self.safe_crop(frame, x1, y1, x2, y2)
+
+                    if face_img.size == 0:
+                        continue
+
+                    # 🔥 adjust keypoints ke local crop
+                    if keypoints is not None:
+                        try:
+                            kp = {
+                                'left_eye': (
+                                    keypoints['left_eye'][0] - x1,
+                                    keypoints['left_eye'][1] - y1
+                                ),
+                                'right_eye': (
+                                    keypoints['right_eye'][0] - x1,
+                                    keypoints['right_eye'][1] - y1
+                                )
+                            }
+                        except:
+                            kp = None
+                    else:
+                        kp = None
+
+                    # 🔥 predict
+                    label, confidence = self.predict_face(face_img, kp)
+
+                    # 🔥 voting
+                    final_label = self.voting(idx, label)
+
+                    if final_label == "unknown":
+                        name = "Unknown"
+                    else:
+                        name = self.inverse_label_map.get(final_label, "Unknown")
+
+                    # 🔹 draw
+                    cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
+
+                    cv2.putText(
+                        frame,
+                        f"{name} ({confidence:.2f})",
+                        (x1, y1-10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0,255,0),
+                        2
+                    )
+
+                except:
                     continue
 
-                # predict
-                label, confidence = self.predict_face(face_img)
-
-                # voting
-                final_label = self.voting(label)
-
-                if final_label == "unknown face":
-                    name = "unknown face"
-                else:
-                    name = self.inverse_label_map.get(final_label, "unknown face")
-
-                # bounding box
-                cv2.rectangle(frame, (x,y), (x+w, y+h), (0,255,0), 2)
-
-                # label
-                cv2.putText(
-                    frame,
-                    f"{name} ({confidence:.2f})",
-                    (x, y-10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (0,255,0),
-                    2
-                )
-
-            # =====================================================
-            # DISPLAY
-            # =====================================================
-            cv2.imshow("Face Realtime (Fast MTCNN)", frame)
+            cv2.imshow("Face Recognition (Stable)", frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
         cap.release()
         cv2.destroyAllWindows()
-    

@@ -41,12 +41,9 @@ class DatasetLoader:
                         X.append(aug_img)
                         y.append(self.label_map[class_name])
                 else:
-                    img = self.preprocess.process_inference(img)
-                    X.append(img)
+                    processed = self.preprocess.process_inference(img)
+                    X.append(processed)
                     y.append(self.label_map[class_name])
-
-                X.append(img)
-                y.append(self.label_map[class_name])
 
         return np.array(X), np.array(y)
 

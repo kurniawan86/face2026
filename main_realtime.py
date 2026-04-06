@@ -9,9 +9,9 @@ label_map = {
 }
 
 app = FaceRealtime(
-    model_path="face_model.keras",
+    model_path="face_modelVGGLike.keras",
     label_map=label_map,
-    detect_interval=5 
+    detect_interval=10
 )
 
 app.run()

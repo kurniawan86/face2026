@@ -13,8 +13,8 @@ class FaceRealtime:
         model_path,
         label_map,
         img_size=(112,112),
-        vote_size=10,
-        detect_interval=10,
+        vote_size=20,
+        detect_interval=20,
         confidence_threshold=0.65
     ):
         self.model = tf.keras.models.load_model(model_path)

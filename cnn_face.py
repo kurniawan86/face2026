@@ -56,10 +56,10 @@ class CNNface:
         model = models.Sequential()
 
         model.add(layers.Conv2D(6, (5,5), activation='relu', input_shape=self.input_shape))
-        model.add(layers.AveragePooling2D())
+        model.add(layers.AveragePooling2D(pool_size=(2, 2)))
 
         model.add(layers.Conv2D(16, (5,5), activation='relu'))
-        model.add(layers.AveragePooling2D())
+        model.add(layers.AveragePooling2D(pool_size=(2, 2)))
 
         model.add(layers.Flatten())
         model.add(layers.Dense(120, activation='relu'))
